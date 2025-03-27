@@ -1,25 +1,36 @@
-import sys  # Required for handling system-related functions, such as application exit
+# -*- coding: utf-8 -*-
+
+import sys
 import pandas as pd
 import os
 import datetime
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTextEdit  # Importing necessary PyQt widgets for GUI
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QTextEdit, QComboBox, QSizePolicy, QMessageBox
 from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtGui import QPixmap
 import matplotlib.pyplot as plt
-from io import BytesIO  # QTimer is used to update elapsed time dynamically every second, Qt provides alignment options  # QTimer is used to update elapsed time dynamically every second
+from io import BytesIO
 
-ACTIVITIES_FILE = "activities.csv"  # File storing activity list
-LOG_FILE = os.path.join(os.getcwd(), "time_log.csv")  # File where tracked time is logged
+ACTIVITIES_FILE = "activities.csv"
+LOG_FILE = os.path.join(os.getcwd(), "./time_log.csv")
 current_task = None
 start_time = None
 
-def load_activities():  # Loads the list of activities from CSV file
+def load_activities():
+    """ Load and return a sorted list of activities from CSV file. """
     if os.path.exists(ACTIVITIES_FILE):
         df = pd.read_csv(ACTIVITIES_FILE)
-        return df['Activities'].tolist()
-    return ["Example Task"]
+        activities = df['Activities'].dropna().unique().tolist()
+        return sorted(activities, key=str.casefold)  # Case-insensitive sorting
+    return []
 
-def save_log(task, start, end):  # Saves task start and stop times into log file
+def save_activities(activities):
+    """ Save activities to CSV file in sorted order (preserving original case). """
+    activities = sorted(set(activities), key=str.casefold)  # Remove duplicates case-insensitively
+    df = pd.DataFrame(activities, columns=['Activities'])
+    df.to_csv(ACTIVITIES_FILE, index=False)
+
+def save_log(task, start, end):
+    """ Save time tracking log entry. """
     start_unix = start.timestamp()
     end_unix = end.timestamp()
     duration_seconds = int(end_unix - start_unix)
@@ -35,139 +46,179 @@ def save_log(task, start, end):  # Saves task start and stop times into log file
     df = pd.concat([df, new_entry], ignore_index=True)
     df.to_csv(LOG_FILE, index=False)
 
-def filter_today_logs():  # Filters log entries to show only today’s activities and formats columns
+def filter_today_logs():
+    """ Retrieve logs for the current day. """
     if not os.path.exists(LOG_FILE) or os.path.getsize(LOG_FILE) == 0:
         return pd.DataFrame(columns=["StartTime", "EndTime", "Duration", "Task"])
     
     df = pd.read_csv(LOG_FILE)
     today = datetime.datetime.now().strftime('%Y-%m-%d')
-    df = df[df['StartTime'].str.startswith(today)]  # Filter today's logs
+    df = df[df['StartTime'].str.startswith(today)]
     
     if not df.empty:
-        df['StartTime'] = pd.to_datetime(df['StartTime'], errors='coerce').dt.strftime('%H:%M')  # Convert to HH:MM
-        df['EndTime'] = pd.to_datetime(df['EndTime'], errors='coerce').dt.strftime('%H:%M')  # Convert to HH:MM
-        df = df[['StartTime', 'EndTime', 'Duration', 'Task']]  # Ensure correct column order
+        df['StartTime'] = pd.to_datetime(df['StartTime'], errors='coerce').dt.strftime('%H:%M')
+        df['EndTime'] = pd.to_datetime(df['EndTime'], errors='coerce').dt.strftime('%H:%M')
+        df = df[['StartTime', 'EndTime', "Duration", "Task"]]
     
-    return df.tail(5)  # Show last 5 entries from today
+    return df.tail(5)
 
-class TimeTrackerApp(QWidget):  # Main GUI application class for time tracking
+class TimeTrackerApp(QWidget):
     def update_elapsed_label(self):
+        """ Update elapsed time label dynamically. """
         if start_time:
             elapsed_seconds = int((datetime.datetime.now() - start_time).total_seconds())
             formatted_time = f"{elapsed_seconds // 3600:02}:{(elapsed_seconds % 3600) // 60:02}:{elapsed_seconds % 60:02}"
-            self.elapsed_time_label.setText(f"Elapsed Time: {formatted_time}")  # Main GUI application class for time tracking
+            self.elapsed_time_label.setText(f"Elapsed Time: {formatted_time}")
+    
     def __init__(self):
         super().__init__()
         self.initUI()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_elapsed_label)
 
-    def initUI(self):  # Initializes the GUI layout and elements
+    def initUI(self):
+        """ Initialize UI components. """
         self.setWindowTitle("Time Tracker")
-        self.main_layout = QHBoxLayout()
+        self.main_layout = QVBoxLayout()
         
-        self.button_layout = QHBoxLayout()  # Adjusted button layout for better placement  # Smaller button layout under timing status  # Layout for top buttons
-        self.left_layout = QVBoxLayout()  # Main vertical layout for buttons and labels
+        # Status Label
         self.status_label = QLabel("No active task")
-        self.left_layout.addWidget(self.status_label)
-        self.left_layout.addLayout(self.button_layout)  # Buttons placed just below status label
-        self.elapsed_time_label = QLabel("Elapsed Time: 00:00:00")
-        self.left_layout.addWidget(self.elapsed_time_label)
+        self.main_layout.addWidget(self.status_label)
         
-        self.buttons = []
-        self.load_activity_buttons()
-        
-        self.stop_button = QPushButton("⏹")  # Stop button as an icon
-        self.stop_button.setFixedSize(50, 50)  # Reduce button size  # Stop button as an icon
+        # Drop-down for selecting or entering an activity (starts blank)
+        self.task_dropdown = QComboBox()
+        self.task_dropdown.setEditable(True)  # Allows user to type a new task
+        self.task_dropdown.addItem("")  # Start with blank selection
+        self.task_dropdown.addItems(load_activities())  # Load activities sorted
+        self.task_dropdown.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.main_layout.addWidget(self.task_dropdown)
+
+        # Start Button
+        self.start_button = QPushButton("Start")
+        self.start_button.clicked.connect(self.start_task)
+        self.main_layout.addWidget(self.start_button)
+
+        # Stop Button
+        self.stop_button = QPushButton("Stop")
         self.stop_button.clicked.connect(self.stop_task)
-        self.button_layout.addWidget(self.stop_button, alignment=Qt.AlignLeft)  # Align stop button left  # Center stop button  # Align stop button to the left
-        
-        self.refresh_button = QPushButton("🔄")  # Refresh button as an icon
-        self.refresh_button.setFixedSize(50, 50)  # Reduce button size  # Refresh button as an icon
+        self.main_layout.addWidget(self.stop_button)
+
+        # Refresh Button
+        self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh)
-        self.button_layout.addWidget(self.refresh_button, alignment=Qt.AlignCenter)  # Align refresh button right  # Center refresh button  # Align refresh button to the right
-        
+        self.main_layout.addWidget(self.refresh_button)
+
+        # Elapsed Time Label
+        self.elapsed_time_label = QLabel("Elapsed Time: 00:00:00")
+        self.main_layout.addWidget(self.elapsed_time_label)
+
+        # Log Display
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
-        self.pie_chart_label = QLabel()
-        self.right_layout = QVBoxLayout()
-        self.pie_chart_container = QHBoxLayout()
-        self.pie_chart_container.addWidget(self.pie_chart_label, alignment=Qt.AlignRight)  # Move further right
-        self.right_layout.addLayout(self.pie_chart_container)  # Move pie chart to the left
-        self.main_layout.addLayout(self.right_layout)  # Move pie chart to the right of the preview
-        self.update_pie_chart()
-        self.log_display.setStyleSheet("font-size: 10px; font-family: monospace;")
-        self.update_log_display()
-        
-        self.main_layout.addLayout(self.button_layout)  # Add button layout below status message  # Add top layout first
-        self.main_layout.addLayout(self.left_layout, stretch=1)  # Then add left layout
-        self.right_layout.addWidget(self.log_display)  # Move preview to the right
-        self.setLayout(self.main_layout)
+        self.log_display.setStyleSheet("font-size: 8px; font-family: Menlo; text-align: left;")
 
-    def load_activity_buttons(self):  # Dynamically loads buttons based on available activities
-        for btn in self.buttons:
-            btn.setParent(None)
-        self.buttons.clear()
-        for task in load_activities():
-            btn = QPushButton(task)
-            btn.clicked.connect(lambda checked, t=task: self.start_task(t))
-            task_layout = QHBoxLayout()
-            task_layout.addWidget(btn)
-            self.left_layout.addLayout(task_layout)
-            self.buttons.append(btn)
-    
-    def start_task(self, task):  # Starts a task, stopping any currently running task
+        self.main_layout.addWidget(self.log_display)
+
+        # Pie Chart Display
+        self.pie_chart_label = QLabel()
+        self.main_layout.addWidget(self.pie_chart_label)
+
+        self.setLayout(self.main_layout)
+        self.update_log_display()
+
+    def update_pie_chart(self):
+        """ Generate and update pie chart for task distribution with smaller font. """
+        df = filter_today_logs()
+        if not df.empty:
+            df['Duration'] = df['Duration'].apply(lambda x: sum(int(t) * 60 ** i for i, t in enumerate(reversed(x.split(':')))))
+            task_durations = df.groupby('Task')['Duration'].sum()
+            
+            plt.figure(figsize=(3, 3))
+            
+            wedges, texts, autotexts = plt.pie(
+                task_durations, labels=task_durations.index, autopct='%1.1f%%', 
+                pctdistance=0.6, labeldistance=0.4, textprops={'fontsize': 6}  # 👈 Smaller font
+            )
+            
+            # Reduce the font size of labels and percentages
+            for text in texts:
+                text.set_fontsize(6)  # 👈 Smaller label font
+            for autotext in autotexts:
+                autotext.set_fontsize(6)  # 👈 Smaller percentage font
+            
+            plt.axis('equal')  # Keep the pie chart circular
+            buf = BytesIO()
+            plt.savefig(buf, format='png', dpi=100)
+            plt.close()
+            pixmap = QPixmap()
+            pixmap.loadFromData(buf.getvalue())
+            self.pie_chart_label.setPixmap(pixmap)
+        
+        
+    def refresh(self):
+        """ Refresh the drop-down list and update logs. """
+        self.task_dropdown.clear()
+        self.task_dropdown.addItem("")  # Keep initial blank selection
+        self.task_dropdown.addItems(load_activities())
+        self.update_log_display()
+
+    def update_log_display(self):
+        """ Update log display with today's logs. """
+        df = filter_today_logs()
+        log_text = df.to_string(index=False) if not df.empty else "No log entries yet."
+        self.log_display.setText(log_text)
+        self.update_pie_chart()  # Ensure pie chart updates
+
+    def show_warning(self, message):
+        """ Display a warning message box. """
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText(message)
+        msg.setWindowTitle("Warning")
+        msg.exec_()
+
+    def start_task(self):
+        """ Start timing a selected or newly entered task. """
         global current_task, start_time
+        task = self.task_dropdown.currentText().strip()
+
+        if not task:
+            self.show_warning("Please enter a valid task before starting.")
+            return
+
+        current_activities = load_activities()
+        lower_case_activities = {activity.lower(): activity for activity in current_activities}
+
+        if task.lower() in lower_case_activities:
+            task = lower_case_activities[task.lower()]
+        else:
+            current_activities.append(task)
+            save_activities(current_activities)
+            self.refresh()
+
         if current_task:
             save_log(current_task, start_time, datetime.datetime.now())
+
         current_task = task
         start_time = datetime.datetime.now()
         self.status_label.setText(f"⏳ Timing started for {task}")
-        self.elapsed_time_label.setText("Elapsed Time: 00:00:00")
-        self.timer.start(1000)  # Update elapsed time every second
+        self.timer.start(1000)
         self.update_log_display()
 
-    def stop_task(self):  # Stops the current task and logs its duration
+    def stop_task(self):
+        """ Stop current task and log time. """
         global current_task, start_time
         if current_task:
             save_log(current_task, start_time, datetime.datetime.now())
             current_task = None
             start_time = None
             self.status_label.setText("✅ Timing stopped")
-            self.elapsed_time_label.setText("Elapsed Time: 00:00:00")
             self.timer.stop()
             self.update_log_display()
         else:
-            self.status_label.setText("⚠️ No active task to stop")
+            self.show_warning("No active task to stop.")
 
-    def update_log_display(self):
-        self.update_pie_chart()  # Refreshes the log display to show recent tasks
-        df = filter_today_logs()  # Ensure only today's logs are displayed
-        log_text = df.to_string(index=False) if not df.empty else "No log entries yet."
-        self.log_display.setText(log_text)
-    
-    def update_pie_chart(self):
-        df = pd.read_csv(LOG_FILE)  # Use full dataset to calculate time spent per task
-        df = filter_today_logs()
-        if not df.empty:
-            df['Duration'] = df['Duration'].apply(lambda x: sum(int(t) * 60 ** i for i, t in enumerate(reversed(x.split(':')))))
-            task_durations = df.groupby('Task')['Duration'].sum()
-            plt.figure(figsize=(3, 3))
-            wedges, texts, autotexts = plt.pie(task_durations,labels=task_durations.index,autopct='%1.1f%%', pctdistance=0.5,labeldistance=0.35 )            
-            
-            plt.axis('equal')
-            buf = BytesIO()
-            plt.savefig(buf, format='png')
-            plt.close()
-            pixmap = QPixmap()
-            pixmap.loadFromData(buf.getvalue())
-            self.pie_chart_label.setPixmap(pixmap)
-
-    def refresh(self):  # Reloads activity buttons and updates log display
-        self.load_activity_buttons()
-        self.update_log_display()
-
-if __name__ == '__main__':  # Runs the PyQt application when executed directly
+if __name__ == '__main__':
     app = QApplication(sys.argv)
     tracker = TimeTrackerApp()
     tracker.show()
