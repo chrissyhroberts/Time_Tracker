@@ -6,9 +6,6 @@ import os
 import datetime
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QTextEdit, QComboBox, QSizePolicy, QMessageBox
 from PyQt5.QtCore import QTimer, Qt
-from PyQt5.QtGui import QPixmap
-import matplotlib.pyplot as plt
-from io import BytesIO
 
 ACTIVITIES_FILE = "activities.csv"
 LOG_FILE = os.path.join(os.getcwd(), "./time_log.csv")
@@ -85,7 +82,7 @@ class TimeTrackerApp(QWidget):
         self.status_label = QLabel("No active task")
         self.main_layout.addWidget(self.status_label)
         
-        # Drop-down for selecting or entering an activity (starts blank)
+        # Drop-down for selecting or entering an activity
         self.task_dropdown = QComboBox()
         self.task_dropdown.setEditable(True)  # Allows user to type a new task
         self.task_dropdown.addItem("")  # Start with blank selection
@@ -112,49 +109,62 @@ class TimeTrackerApp(QWidget):
         self.elapsed_time_label = QLabel("Elapsed Time: 00:00:00")
         self.main_layout.addWidget(self.elapsed_time_label)
 
-        # Log Display
+        # Log Display (Today's logs)
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
-        self.log_display.setStyleSheet("font-size: 8px; font-family: Menlo; text-align: left;")
-
+        self.log_display.setStyleSheet("font-size: 10px; font-family: Menlo; text-align: left;")
+        self.main_layout.addWidget(QLabel("Today's Logged Tasks"))
         self.main_layout.addWidget(self.log_display)
 
-        # Pie Chart Display
-        self.pie_chart_label = QLabel()
-        self.main_layout.addWidget(self.pie_chart_label)
+        # Task Summary Display
+        self.summary_display = QTextEdit()
+        self.summary_display.setReadOnly(True)
+        self.summary_display.setStyleSheet("font-size: 10px; font-family: Menlo; text-align: left;")
+        self.main_layout.addWidget(QLabel("Task Summary"))
+        self.main_layout.addWidget(self.summary_display)
 
         self.setLayout(self.main_layout)
         self.update_log_display()
 
-    def update_pie_chart(self):
-        """ Generate and update pie chart for task distribution with smaller font. """
-        df = filter_today_logs()
-        if not df.empty:
-            df['Duration'] = df['Duration'].apply(lambda x: sum(int(t) * 60 ** i for i, t in enumerate(reversed(x.split(':')))))
-            task_durations = df.groupby('Task')['Duration'].sum()
-            
-            plt.figure(figsize=(3, 3))
-            
-            wedges, texts, autotexts = plt.pie(
-                task_durations, labels=task_durations.index, autopct='%1.1f%%', 
-                pctdistance=0.6, labeldistance=0.4, textprops={'fontsize': 6}  # 👈 Smaller font
-            )
-            
-            # Reduce the font size of labels and percentages
-            for text in texts:
-                text.set_fontsize(6)  # 👈 Smaller label font
-            for autotext in autotexts:
-                autotext.set_fontsize(6)  # 👈 Smaller percentage font
-            
-            plt.axis('equal')  # Keep the pie chart circular
-            buf = BytesIO()
-            plt.savefig(buf, format='png', dpi=100)
-            plt.close()
-            pixmap = QPixmap()
-            pixmap.loadFromData(buf.getvalue())
-            self.pie_chart_label.setPixmap(pixmap)
+    def update_task_summary(self):
+        """ Generate and update text-based summary of task distribution. """
+        if not os.path.exists(LOG_FILE) or os.path.getsize(LOG_FILE) == 0:
+            self.summary_display.setText("No log entries yet.")
+            return
         
+        df = pd.read_csv(LOG_FILE)
+
+        if df.empty:
+            self.summary_display.setText("No log entries yet.")
+            return
+
+        # Convert duration to total seconds
+        df['Duration'] = df['Duration'].apply(lambda x: sum(int(t) * 60 ** i for i, t in enumerate(reversed(x.split(':')))))
         
+        # Sum durations per task
+        task_durations = df.groupby('Task')['Duration'].sum()
+        
+        # Convert to hours
+        total_time = task_durations.sum()
+        task_durations_hours = task_durations / 3600  # Convert seconds to hours
+        task_percentage = (task_durations / total_time) * 100  # Compute percentages
+
+        # Create summary table, sorting by percentage before formatting
+        summary_df = pd.DataFrame({
+            "Task": task_durations_hours.index,
+            "Total Hours": task_durations_hours.round(2),
+            "Percent of Time": task_percentage.round(1)  # Keep numeric for sorting
+        }).sort_values(by="Percent of Time", ascending=False)
+
+        # Convert percentage to string format after sorting
+        summary_df["Percent of Time"] = summary_df["Percent of Time"].astype(str) + "%"
+
+        # Format as text table
+        log_text = summary_df.to_string(index=False, justify='left')
+
+        # Update the summary display with the new summary
+        self.summary_display.setText(f"Task Summary\n{'-'*40}\n{log_text}")
+
     def refresh(self):
         """ Refresh the drop-down list and update logs. """
         self.task_dropdown.clear()
@@ -163,19 +173,11 @@ class TimeTrackerApp(QWidget):
         self.update_log_display()
 
     def update_log_display(self):
-        """ Update log display with today's logs. """
+        """ Update log display with today's logs and task summary. """
         df = filter_today_logs()
         log_text = df.to_string(index=False) if not df.empty else "No log entries yet."
         self.log_display.setText(log_text)
-        self.update_pie_chart()  # Ensure pie chart updates
-
-    def show_warning(self, message):
-        """ Display a warning message box. """
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Warning)
-        msg.setText(message)
-        msg.setWindowTitle("Warning")
-        msg.exec_()
+        self.update_task_summary()
 
     def start_task(self):
         """ Start timing a selected or newly entered task. """
@@ -183,18 +185,7 @@ class TimeTrackerApp(QWidget):
         task = self.task_dropdown.currentText().strip()
 
         if not task:
-            self.show_warning("Please enter a valid task before starting.")
             return
-
-        current_activities = load_activities()
-        lower_case_activities = {activity.lower(): activity for activity in current_activities}
-
-        if task.lower() in lower_case_activities:
-            task = lower_case_activities[task.lower()]
-        else:
-            current_activities.append(task)
-            save_activities(current_activities)
-            self.refresh()
 
         if current_task:
             save_log(current_task, start_time, datetime.datetime.now())
@@ -215,8 +206,6 @@ class TimeTrackerApp(QWidget):
             self.status_label.setText("✅ Timing stopped")
             self.timer.stop()
             self.update_log_display()
-        else:
-            self.show_warning("No active task to stop.")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
