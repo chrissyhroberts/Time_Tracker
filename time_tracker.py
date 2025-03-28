@@ -65,8 +65,8 @@ class TimeTrackerApp(QWidget):
         if start_time:
             elapsed_seconds = int((datetime.datetime.now() - start_time).total_seconds())
             formatted_time = f"{elapsed_seconds // 3600:02}:{(elapsed_seconds % 3600) // 60:02}:{elapsed_seconds % 60:02}"
+            self.elapsed_time_label.setStyleSheet("font-size: 20px;")
             self.elapsed_time_label.setText(f"Elapsed Time: {formatted_time}")
-    
     def __init__(self):
         super().__init__()
         self.initUI()
@@ -107,7 +107,9 @@ class TimeTrackerApp(QWidget):
 
         # Elapsed Time Label
         self.elapsed_time_label = QLabel("Elapsed Time: 00:00:00")
+        self.elapsed_time_label.setStyleSheet("font-size: 20px;")
         self.main_layout.addWidget(self.elapsed_time_label)
+        
 
         # Log Display (Today's logs)
         self.log_display = QTextEdit()
