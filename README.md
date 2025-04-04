@@ -1,5 +1,6 @@
 # Open Time Tracker
 
+<img width="413" alt="Screenshot 2025-04-02 at 18 49 41" src="https://github.com/user-attachments/assets/ba3cac07-d4f2-4b3f-aedc-de556e109812" />
 
 ## Description
 
@@ -9,16 +10,26 @@ I built this because I was frustrated with apps such as Toggl which have annoyin
 
 All the data are saved to CSV files on your machine. There's no cloud, no syncs and no frills. 
 
-<img width="442" alt="Screenshot 2025-03-28 at 11 34 38" src="https://github.com/user-attachments/assets/3df80bc1-2fc1-47a3-a21f-ad197502adc5" />
 
 ## Features
 
+
+V1.0
 * Start and stop time tracking for selected tasks
 * Auto-save time logs in CSV format
 * Display of today's logs and summary statistics
 * Task dropdown with editable input for new tasks
 * Auto-refresh feature to update logs and task list
-  
+
+V1.1
+* Added support for backdated log entries with date, start, and stop time inputs
+*  Implemented elapsed time label that updates in real time
+*  Enabled partial backdating via manual entry of start time before stopping task
+*  Display and update of today's task log and task summary now more responsive
+*  Added error handling for invalid datetime inputs
+*  Improved UI layout with clearer labeling and font styling
+*  Refactored duration and summary calculation logic for consistency
+
 ## Installation
 
 Ensure you have Python installed. Then, install the required dependencies:
