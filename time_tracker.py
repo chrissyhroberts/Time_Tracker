@@ -42,25 +42,27 @@ def save_log(task, start, end):
 def filter_today_logs():
     if not os.path.exists(LOG_FILE) or os.path.getsize(LOG_FILE) == 0:
         return pd.DataFrame(columns=["StartTime", "EndTime", "Duration", "Task"])
-
     df = pd.read_csv(LOG_FILE)
     df = df[df['StartTime'].notna()]
     today = datetime.datetime.now().strftime('%Y-%m-%d')
     df = df[df['StartTime'].astype(str).str.startswith(today)]
-
     if not df.empty:
         df['StartTime'] = pd.to_datetime(df['StartTime'], errors='coerce').dt.strftime('%H:%M')
         df['EndTime'] = pd.to_datetime(df['EndTime'], errors='coerce').dt.strftime('%H:%M')
         df = df[['StartTime', 'EndTime', "Duration", "Task"]]
-
     return df.tail(5)
 
 class TimeTrackerApp(QWidget):
     def __init__(self):
         super().__init__()
+        self.stop_time_autoupdate = True
         self.initUI()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_elapsed_label)
+
+        self.stop_time_timer = QTimer(self)
+        self.stop_time_timer.timeout.connect(self.update_stop_time_edit)
+        self.stop_time_timer.start(1000)
 
     def update_elapsed_label(self):
         global start_time
@@ -77,6 +79,13 @@ class TimeTrackerApp(QWidget):
                 elapsed_seconds = 0
             formatted_time = f"{elapsed_seconds // 3600:02}:{(elapsed_seconds % 3600) // 60:02}:{elapsed_seconds % 60:02}"
             self.elapsed_time_label.setText(f"Elapsed Time: {formatted_time}")
+
+    def update_stop_time_edit(self):
+        if self.stop_time_autoupdate:
+            self.stop_time_edit.setText(datetime.datetime.now().strftime('%H:%M:%S'))
+
+    def disable_stop_time_autoupdate(self):
+        self.stop_time_autoupdate = False
 
     def initUI(self):
         self.resize(300, 700)
@@ -139,6 +148,7 @@ class TimeTrackerApp(QWidget):
         self.stop_time_edit.setFixedHeight(30)
         self.stop_time_edit.setText("")
         self.stop_time_edit.setStyleSheet("font-size: 14px; font-family: Menlo;")
+        self.stop_time_edit.textEdited.connect(self.disable_stop_time_autoupdate)
         stop_time_col.addWidget(self.stop_time_edit)
 
         time_row.addLayout(start_time_col)
@@ -194,6 +204,7 @@ class TimeTrackerApp(QWidget):
         self.task_dropdown.clear()
         self.task_dropdown.addItem("")
         self.task_dropdown.addItems(load_activities())
+        self.start_date_edit.setText(datetime.datetime.now().strftime('%Y-%m-%d'))
         self.update_log_display()
 
     def update_log_display(self):
@@ -211,6 +222,7 @@ class TimeTrackerApp(QWidget):
             save_log(current_task, start_time, datetime.datetime.now())
         current_task = task
         now = datetime.datetime.now()
+        self.stop_time_autoupdate = True
         self.start_time_edit.setText(now.strftime('%H:%M:%S'))
         self.start_date_edit.setText(now.strftime('%Y-%m-%d'))
         start_time = now
