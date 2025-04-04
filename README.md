@@ -14,14 +14,14 @@ All the data are saved to CSV files on your machine. There's no cloud, no syncs 
 ## Features
 
 
-V1.0
+V1.0.0
 * Start and stop time tracking for selected tasks
 * Auto-save time logs in CSV format
 * Display of today's logs and summary statistics
 * Task dropdown with editable input for new tasks
 * Auto-refresh feature to update logs and task list
 
-V1.1
+V1.1.0
 * Added support for backdated log entries with date, start, and stop time inputs
 *  Implemented elapsed time label that updates in real time
 *  Enabled partial backdating via manual entry of start time before stopping task
@@ -29,6 +29,13 @@ V1.1
 *  Added error handling for invalid datetime inputs
 *  Improved UI layout with clearer labeling and font styling
 *  Refactored duration and summary calculation logic for consistency
+
+V1.1.1
+
+* Auto-updating 'Stop Time' field every second using a QTimer.
+* Manual override detection: if user edits the field, auto-update stops.
+* Restart auto-update when a new task is started.
+* Refresh now updates start date to today’s date.
 
 ## Installation
 
