@@ -37,12 +37,6 @@ V1.1.1
 * Restart auto-update when a new task is started.
 * Refresh now updates start date to today’s date.
 
-## App version
-Click the latest release and download a preconfiled app for Mac or PC. 
-
-https://github.com/chrissyhroberts/Time_Tracker/releases/tag/v1.1.1
-
-You may need to give security permission to run this first time.
 
 ## Installation
 
