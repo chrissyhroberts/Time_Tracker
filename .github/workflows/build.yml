@@ -1,0 +1,153 @@
+name: Build desktop apps
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  macos-apple-silicon:
+    name: macOS Apple Silicon
+    runs-on: macos-15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.14.7 arm64
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.7"
+          architecture: arm64
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+
+      - name: Verify native architecture
+        run: |
+          python -c "import platform, sys; print(sys.version); print(platform.machine()); assert platform.machine() == 'arm64'"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+
+      - name: Build macOS app
+        run: |
+          python -m PyInstaller \
+            --noconfirm \
+            --clean \
+            --windowed \
+            --name OpenTimeTracker \
+            --add-data "activities.csv:." \
+            time_tracker.py
+
+      - name: Verify app architecture
+        run: |
+          file dist/OpenTimeTracker.app/Contents/MacOS/OpenTimeTracker
+          file dist/OpenTimeTracker.app/Contents/MacOS/OpenTimeTracker | grep -q "arm64"
+          codesign --verify --deep --strict dist/OpenTimeTracker.app
+
+      - name: Package macOS app
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            dist/OpenTimeTracker.app \
+            OpenTimeTracker-macOS-arm64.zip
+
+      - name: Upload macOS build
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenTimeTracker-macOS-arm64
+          path: OpenTimeTracker-macOS-arm64.zip
+          if-no-files-found: error
+
+  windows-x64:
+    name: Windows x64
+    runs-on: windows-2025
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.14.7 x64
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.7"
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+
+      - name: Verify native architecture
+        shell: pwsh
+        run: |
+          python -c "import platform, sys; print(sys.version); print(platform.machine()); assert platform.machine() in ('AMD64', 'x86_64')"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: |
+          python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --onefile `
+            --windowed `
+            --name OpenTimeTracker `
+            --add-data "activities.csv:." `
+            time_tracker.py
+
+      - name: Verify executable exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/OpenTimeTracker.exe")) { throw "Windows executable was not produced" }
+          Get-Item "dist/OpenTimeTracker.exe" | Format-List Name,Length,LastWriteTime
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenTimeTracker-Windows-x64
+          path: dist/OpenTimeTracker.exe
+          if-no-files-found: error
+
+  release:
+    name: Publish tagged release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - macos-apple-silicon
+      - windows-x64
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: OpenTimeTracker-*
+          path: release-files
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            release-files/* \
+            --title "Open Time Tracker ${GITHUB_REF_NAME}" \
+            --generate-notes
