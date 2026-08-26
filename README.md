@@ -4,6 +4,8 @@ A small, local-first desktop time tracker for macOS and Windows.
 
 Open Time Tracker is designed for people who want a very simple way to record what they are working on, keep the underlying data in ordinary CSV files, and get useful summaries without creating an account or sending data to a server.
 
+It supports both live timing and retrospective entry, including a full 24-hour weekly calendar for visually filling gaps in the log.
+
 ![Open Time Tracker main window](docs/screenshots/main-window.png)
 
 ## How to use
@@ -67,7 +69,23 @@ From here you can:
 
 Retrospective renaming creates timestamped backups before modifying your CSV files.
 
-### 6. Open the underlying data
+### 6. Use the weekly calendar for retrospective entry
+
+Click **Show Calendar** to expand a 24-hour Monday-to-Sunday week view beside the main tracker.
+
+The calendar is designed for retrospective entry and makes missing periods immediately visible.
+
+- Every day shows the full **00:00–24:00** period.
+- Existing logs are drawn at their actual times.
+- Overnight work appears across the relevant day boundaries.
+- Use **‹**, **›** and **Today** to move between weeks.
+- Drag over an empty period to create a new retrospective entry.
+- Times snap to 15-minute intervals.
+- After releasing the drag, choose or type the activity and save it.
+
+The calendar writes to the same `time_log.csv` as the normal timer and backdated-entry form.
+
+### 7. Open the underlying data
 
 Click **Open Data Folder** to open the application's data directory in Finder or Explorer.
 
@@ -164,6 +182,10 @@ Removing an activity from the dropdown does **not** alter historical records.
 - Activity merging
 - Automatic backups before historical renames
 - Direct access to the data folder
+- Expandable 24-hour Monday-Sunday calendar
+- Drag-to-create retrospective calendar entries
+- Week navigation and current-week jump
+- Overnight work visualisation across day boundaries
 - Local CSV storage
 - Native Apple Silicon macOS packaging
 - Standalone Windows x64 packaging
@@ -172,6 +194,18 @@ Removing an activity from the dropdown does **not** alter historical records.
 ---
 
 ## Version history
+
+### v1.4.0
+
+- Added an expandable **24-hour weekly calendar** beside the main tracker.
+- Monday-Sunday columns show real dates for the selected week.
+- Existing time logs are rendered as calendar blocks at their recorded times.
+- Overnight work is displayed across the appropriate day boundaries.
+- Added previous-week, next-week and **Today** navigation.
+- Added drag-to-create retrospective entries directly from the calendar.
+- Calendar selections snap to 15-minute intervals.
+- New calendar entries use the existing activity list and write to the same `time_log.csv`.
+- Calendar and summary views refresh automatically after saving.
 
 ### v1.3.1
 
