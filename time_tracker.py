@@ -8,17 +8,20 @@ from pathlib import Path
 
 import pandas as pd
 from PyQt5.QtCore import QDate, QTimer, QUrl, Qt
-from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QPainter, QPen
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
+    QScrollArea,
     QMessageBox,
     QPushButton,
     QSizePolicy,
@@ -311,6 +314,327 @@ def summarise_log(start_date=None, end_date=None):
     return summary_df, total_time
 
 
+def week_start_for(date_value):
+    """Return the Monday for the week containing date_value."""
+    return date_value - datetime.timedelta(days=date_value.weekday())
+
+
+def logs_overlapping_range(start_dt, end_dt):
+    """Return log rows whose time interval overlaps [start_dt, end_dt)."""
+    df = load_log()
+    if df.empty:
+        return df
+
+    starts = pd.to_datetime(df["StartTime"], errors="coerce")
+    ends = pd.to_datetime(df["EndTime"], errors="coerce")
+    mask = starts.notna() & ends.notna() & (starts < end_dt) & (ends > start_dt)
+    out = df.loc[mask].copy()
+    if out.empty:
+        return out
+
+    out["_start"] = pd.to_datetime(out["StartTime"], errors="coerce")
+    out["_end"] = pd.to_datetime(out["EndTime"], errors="coerce")
+    return out
+
+
+class WeekDayCanvas(QWidget):
+    """One 24-hour day column used by the retrospective week calendar."""
+
+    MINUTES_PER_DAY = 24 * 60
+    PIXELS_PER_HOUR = 44
+    SNAP_MINUTES = 15
+
+    def __init__(self, owner, date_value):
+        super().__init__(owner)
+        self.owner = owner
+        self.date_value = date_value
+        self.drag_start_minute = None
+        self.drag_current_minute = None
+        self.setMinimumWidth(118)
+        self.setFixedHeight(self.PIXELS_PER_HOUR * 24)
+        self.setMouseTracking(True)
+
+    def minute_from_y(self, y):
+        minute = int(round((y / self.height()) * self.MINUTES_PER_DAY))
+        minute = max(0, min(self.MINUTES_PER_DAY, minute))
+        snap = self.SNAP_MINUTES
+        return int(round(minute / snap) * snap)
+
+    def y_from_minute(self, minute):
+        return (minute / self.MINUTES_PER_DAY) * self.height()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(250, 250, 250))
+
+        # Hour grid.
+        for hour in range(25):
+            y = int(self.y_from_minute(hour * 60))
+            pen = QPen(QColor(205, 205, 205) if hour % 6 else QColor(165, 165, 165))
+            pen.setWidth(1)
+            painter.setPen(pen)
+            painter.drawLine(0, y, self.width(), y)
+
+        # Existing logs. Overnight entries are clipped to the visible day.
+        day_start = datetime.datetime.combine(self.date_value, datetime.time.min)
+        day_end = day_start + datetime.timedelta(days=1)
+        df = logs_overlapping_range(day_start, day_end)
+        if not df.empty:
+            palette = [
+                QColor(198, 220, 245),
+                QColor(211, 233, 210),
+                QColor(245, 221, 190),
+                QColor(229, 210, 238),
+                QColor(241, 205, 213),
+                QColor(206, 228, 229),
+            ]
+            for _, row in df.iterrows():
+                start = max(row["_start"].to_pydatetime(), day_start)
+                end = min(row["_end"].to_pydatetime(), day_end)
+                start_minute = (start - day_start).total_seconds() / 60
+                end_minute = (end - day_start).total_seconds() / 60
+                top = self.y_from_minute(start_minute)
+                bottom = self.y_from_minute(end_minute)
+                height = max(4, bottom - top)
+
+                task = str(row.get("Task", ""))
+                colour = palette[abs(hash(task)) % len(palette)]
+                rect = self.rect()
+                x = 3
+                w = max(10, self.width() - 6)
+                painter.fillRect(int(x), int(top), int(w), int(height), QBrush(colour))
+                painter.setPen(QPen(QColor(95, 95, 95)))
+                painter.drawRect(int(x), int(top), int(w), int(height))
+
+                if height >= 18:
+                    label = f"{start.strftime('%H:%M')} {task}"
+                    painter.setPen(QPen(QColor(35, 35, 35)))
+                    painter.drawText(int(x + 4), int(top + 14), label[:22])
+
+        # Active drag selection.
+        if self.drag_start_minute is not None and self.drag_current_minute is not None:
+            a, b = sorted((self.drag_start_minute, self.drag_current_minute))
+            if a != b:
+                top = self.y_from_minute(a)
+                bottom = self.y_from_minute(b)
+                painter.fillRect(
+                    2,
+                    int(top),
+                    self.width() - 4,
+                    max(3, int(bottom - top)),
+                    QBrush(QColor(90, 140, 210, 80)),
+                )
+                painter.setPen(QPen(QColor(70, 110, 175), 2))
+                painter.drawRect(2, int(top), self.width() - 5, max(3, int(bottom - top)))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            minute = self.minute_from_y(event.y())
+            self.drag_start_minute = minute
+            self.drag_current_minute = minute
+            self.update()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_start_minute is not None:
+            self.drag_current_minute = self.minute_from_y(event.y())
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() != Qt.LeftButton or self.drag_start_minute is None:
+            return
+
+        self.drag_current_minute = self.minute_from_y(event.y())
+        start_minute, end_minute = sorted((self.drag_start_minute, self.drag_current_minute))
+        self.drag_start_minute = None
+        self.drag_current_minute = None
+        self.update()
+
+        if end_minute - start_minute < self.SNAP_MINUTES:
+            return
+
+        # Treat an end exactly at 24:00 as next-day midnight.
+        day_start = datetime.datetime.combine(self.date_value, datetime.time.min)
+        start_dt = day_start + datetime.timedelta(minutes=start_minute)
+        end_dt = day_start + datetime.timedelta(minutes=end_minute)
+        self.owner.create_calendar_entry(start_dt, end_dt)
+
+
+class WeekCalendarPanel(QFrame):
+    """Monday-Sunday 24-hour visual calendar with drag-to-create entry."""
+
+    def __init__(self, tracker):
+        super().__init__(tracker)
+        self.tracker = tracker
+        self.current_week_start = week_start_for(datetime.date.today())
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setMinimumWidth(820)
+
+        outer = QVBoxLayout(self)
+
+        nav = QHBoxLayout()
+        self.prev_button = QPushButton("‹")
+        self.prev_button.setToolTip("Previous week")
+        self.prev_button.clicked.connect(lambda: self.shift_week(-7))
+        nav.addWidget(self.prev_button)
+
+        self.today_button = QPushButton("Today")
+        self.today_button.clicked.connect(self.go_today)
+        nav.addWidget(self.today_button)
+
+        self.week_label = QLabel()
+        self.week_label.setAlignment(Qt.AlignCenter)
+        self.week_label.setStyleSheet("font-weight: 600;")
+        nav.addWidget(self.week_label, 1)
+
+        self.next_button = QPushButton("›")
+        self.next_button.setToolTip("Next week")
+        self.next_button.clicked.connect(lambda: self.shift_week(7))
+        nav.addWidget(self.next_button)
+        outer.addLayout(nav)
+
+        hint = QLabel("Drag over any blank time to add a retrospective entry. Times snap to 15 minutes.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #666;")
+        outer.addWidget(hint)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        self.calendar_widget = QWidget()
+        self.grid = QGridLayout(self.calendar_widget)
+        self.grid.setContentsMargins(4, 4, 4, 4)
+        self.grid.setHorizontalSpacing(2)
+        self.grid.setVerticalSpacing(0)
+        self.scroll.setWidget(self.calendar_widget)
+        outer.addWidget(self.scroll, 1)
+
+        self.day_canvases = []
+        self.rebuild_week()
+        QTimer.singleShot(0, self.scroll_to_current_time)
+
+    def shift_week(self, days):
+        self.current_week_start += datetime.timedelta(days=days)
+        self.rebuild_week()
+
+    def go_today(self):
+        self.current_week_start = week_start_for(datetime.date.today())
+        self.rebuild_week()
+        QTimer.singleShot(0, self.scroll_to_current_time)
+
+    def rebuild_week(self):
+        while self.grid.count():
+            item = self.grid.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        end = self.current_week_start + datetime.timedelta(days=6)
+        self.week_label.setText(
+            f"{self.current_week_start.strftime('%d %b %Y')} – {end.strftime('%d %b %Y')}"
+        )
+
+        corner = QLabel("Time")
+        corner.setAlignment(Qt.AlignCenter)
+        self.grid.addWidget(corner, 0, 0)
+
+        self.day_canvases = []
+        for day_index in range(7):
+            date_value = self.current_week_start + datetime.timedelta(days=day_index)
+            header = QLabel(date_value.strftime("%a\n%d %b"))
+            header.setAlignment(Qt.AlignCenter)
+            if date_value == datetime.date.today():
+                header.setStyleSheet("font-weight: 700;")
+            self.grid.addWidget(header, 0, day_index + 1)
+
+            canvas = WeekDayCanvas(self, date_value)
+            self.day_canvases.append(canvas)
+            self.grid.addWidget(canvas, 1, day_index + 1)
+
+        # Time labels in a matching 24-hour column.
+        time_column = QWidget()
+        time_column.setFixedWidth(52)
+        time_column.setFixedHeight(WeekDayCanvas.PIXELS_PER_HOUR * 24)
+        time_layout = QVBoxLayout(time_column)
+        time_layout.setContentsMargins(0, 0, 0, 0)
+        time_layout.setSpacing(0)
+        for hour in range(24):
+            label = QLabel(f"{hour:02}:00")
+            label.setAlignment(Qt.AlignTop | Qt.AlignRight)
+            label.setFixedHeight(WeekDayCanvas.PIXELS_PER_HOUR)
+            label.setStyleSheet("font-size: 10px; color: #666; padding-right: 4px;")
+            time_layout.addWidget(label)
+        self.grid.addWidget(time_column, 1, 0)
+
+    def refresh(self):
+        for canvas in self.day_canvases:
+            canvas.update()
+
+    def scroll_to_current_time(self):
+        # Keep nights fully available but initially position near the current hour
+        # when viewing the current week.
+        if week_start_for(datetime.date.today()) != self.current_week_start:
+            return
+        now = datetime.datetime.now()
+        target_hour = max(0, now.hour - 2)
+        y = target_hour * WeekDayCanvas.PIXELS_PER_HOUR
+        self.scroll.verticalScrollBar().setValue(y)
+
+    def create_calendar_entry(self, start_dt, end_dt):
+        activities = all_activity_names()
+        if not activities:
+            QMessageBox.warning(
+                self,
+                "No Activities",
+                "Add at least one activity before creating a calendar entry.",
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add Calendar Entry")
+        layout = QVBoxLayout(dialog)
+
+        period = QLabel(
+            f"{start_dt.strftime('%a %d %b %Y, %H:%M')} – "
+            f"{end_dt.strftime('%a %d %b %Y, %H:%M')}"
+        )
+        period.setWordWrap(True)
+        layout.addWidget(period)
+
+        layout.addWidget(QLabel("Activity"))
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.addItems(activities)
+        layout.addWidget(combo)
+
+        buttons = QHBoxLayout()
+        cancel = QPushButton("Cancel")
+        save = QPushButton("Save")
+        buttons.addWidget(cancel)
+        buttons.addWidget(save)
+        layout.addLayout(buttons)
+
+        cancel.clicked.connect(dialog.reject)
+        save.clicked.connect(dialog.accept)
+
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        task = combo.currentText().strip()
+        if not task:
+            QMessageBox.warning(self, "Missing Activity", "Choose or enter an activity.")
+            return
+
+        try:
+            save_log(task, start_dt, end_dt)
+            self.tracker.refresh_task_dropdown()
+            self.tracker.update_log_display()
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.critical(self, "Calendar Error", f"Could not save the entry:\n\n{exc}")
+
+
 class ActivityManagerDialog(QDialog):
     """Manage configured activity names and retrospective historical renames."""
 
@@ -503,7 +827,14 @@ class TimeTrackerApp(QWidget):
     def initUI(self):
         self.resize(390, 850)
         self.setWindowTitle("Open Time Tracker")
-        self.main_layout = QVBoxLayout()
+        self.root_layout = QHBoxLayout(self)
+        self.main_panel = QWidget()
+        self.main_layout = QVBoxLayout(self.main_panel)
+        self.root_layout.addWidget(self.main_panel)
+
+        self.calendar_panel = WeekCalendarPanel(self)
+        self.calendar_panel.setVisible(False)
+        self.root_layout.addWidget(self.calendar_panel, 1)
 
         self.elapsed_time_label = QLabel("Elapsed Time: 00:00:00")
         self.elapsed_time_label.setStyleSheet("font-size: 20px;")
@@ -622,13 +953,16 @@ class TimeTrackerApp(QWidget):
         self.manage_activities_button = QPushButton("Manage Activities")
         self.manage_activities_button.clicked.connect(self.open_activity_manager)
         utility_row.addWidget(self.manage_activities_button)
+
+        self.calendar_button = QPushButton("Show Calendar")
+        self.calendar_button.clicked.connect(self.toggle_calendar)
+        utility_row.addWidget(self.calendar_button)
         self.main_layout.addLayout(utility_row)
 
         self.open_data_folder_button = QPushButton("Open Data Folder")
         self.open_data_folder_button.clicked.connect(self.open_data_folder)
         self.main_layout.addWidget(self.open_data_folder_button)
 
-        self.setLayout(self.main_layout)
         self.update_log_display()
 
     def on_summary_filter_changed(self):
@@ -707,6 +1041,19 @@ class TimeTrackerApp(QWidget):
         log_text = df.to_string(index=False) if not df.empty else "No log entries yet."
         self.log_display.setText(log_text)
         self.update_task_summary()
+        if hasattr(self, "calendar_panel"):
+            self.calendar_panel.refresh()
+
+    def toggle_calendar(self):
+        visible = not self.calendar_panel.isVisible()
+        self.calendar_panel.setVisible(visible)
+        self.calendar_button.setText("Hide Calendar" if visible else "Show Calendar")
+        if visible:
+            self.calendar_panel.refresh()
+            self.resize(max(self.width(), 1240), max(self.height(), 900))
+            QTimer.singleShot(0, self.calendar_panel.scroll_to_current_time)
+        else:
+            self.resize(430, self.height())
 
     def open_data_folder(self):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
