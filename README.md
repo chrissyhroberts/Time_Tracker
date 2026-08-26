@@ -1,97 +1,104 @@
 # Open Time Tracker
 
-<img width="413" alt="Screenshot 2025-04-02 at 18 49 41" src="https://github.com/user-attachments/assets/ba3cac07-d4f2-4b3f-aedc-de556e109812" />
+A small, local-first desktop time tracker for macOS and Windows.
 
-## Description
+Open Time Tracker is designed for people who want a very simple way to record what they are working on, keep the underlying data in ordinary CSV files, and get useful summaries without creating an account or sending data to a server.
 
-Open Time Tracker is a small PyQt5/pandas desktop application for logging work activities, tracking time spent on tasks, and viewing daily logs and summary statistics.
+![Open Time Tracker main window](docs/screenshots/main-window.png)
 
-It is deliberately local-first: the application writes CSV files on your machine. There is no cloud account, sync service, subscription, or external database.
+## How to use
 
-## Features
+### 1. Start tracking a task
 
-### V1.0.0
+Choose an activity from the dropdown, or type a new activity name, then click **🟢 Start**.
 
-- Start and stop time tracking for selected tasks
-- Auto-save time logs in CSV format
-- Display today's logs and summary statistics
-- Editable task dropdown
-- Refresh task list and logs
+The app records the start date and time and shows the elapsed time while the task is active.
 
-### V1.1.0
+When you finish, click **🔴 Stop**. The completed session is appended to `time_log.csv`.
 
-- Backdated log entries with date, start, and stop time inputs
-- Real-time elapsed time display
-- Partial backdating by manually editing the start time before stopping a task
-- Improved daily log and task summary display
-- Datetime validation and error handling
-- UI/layout improvements
+If you start a different task while another task is active, the current task is closed first and the new task begins.
 
-### V1.1.1
+### 2. Add a backdated entry
 
-- Auto-updating Stop Time field
-- Manual override detection for Stop Time
-- Restart Stop Time auto-update when a new task starts
-- Refresh resets the start date to today's date
+You can record work that was not timed live.
 
-### V1.2.0 packaging
+1. Choose or type the activity.
+2. Enter the **Start Date**.
+3. Enter the **Start Time**.
+4. Enter the **Stop Time**.
+5. Click **Save Backdated Log**.
 
-- Native Apple Silicon macOS build
-- Windows x64 build
-- Python is bundled inside each desktop build; users do not need to install Python
-- GitHub Actions automatically builds both platforms
-- Version tags such as `v1.2.0` automatically publish both binaries to a GitHub Release
-- Application data now live in a writable per-user data directory instead of depending on the launch working directory
+Times use `HH:MM:SS`; dates use `YYYY-MM-DD`.
 
-### V1.3.0 data management and summaries
+The Stop Time normally updates automatically to the current time, but you can type over it when entering a historical record.
 
-- **Open Data Folder** button opens the per-user CSV storage directory in Finder/Explorer
-- **Manage Activities** window for adding and removing dropdown activities
-- Retrospective activity renaming updates both the configured activity list and all matching historical `time_log.csv` rows
-- Historical renames create timestamped backups in `OpenTimeTracker/backups/` before changing CSV data
-- Removing an activity from the dropdown does not delete or alter historical time records
-- Summary date filters support all-time, since a selected date, through a selected date, or an inclusive start/end date range
-- Summary display now shows total logged hours for the selected period
+### 3. See what you have logged today
 
-## Downloading the desktop app
+The **Today's Logged Tasks** panel shows the most recent sessions that started today.
 
-GitHub Actions produces two packages:
+Click **Refresh** whenever you want to reload the activity list and displays from disk.
 
-- `OpenTimeTracker-macOS-arm64.zip` — native Apple Silicon macOS application
-- `OpenTimeTracker.exe` — Windows x64 executable
+### 4. Get a summary for any period
 
-Every push to `main`, every pull request to `main`, and every manually triggered workflow builds both versions. Builds are available under the corresponding workflow run's **Artifacts** section.
+The **Task Summary** panel totals your logged time by activity and shows each activity's percentage of the selected period.
 
-Pushing a tag beginning with `v`, for example:
+By default, the summary is **all time**.
 
-```bash
-git tag v1.3.0
-git push origin v1.3.0
-```
+Use the date controls to answer questions such as:
 
-also creates a GitHub Release containing the macOS and Windows builds.
+- *How much time have I spent on this project since 12 October?* — tick **From** and choose 12 October.
+- *How much did I work on this between 1 January and 15 February?* — tick **From** and **To** and choose both dates.
+- *How much had I logged up to a particular date?* — tick **To** only.
 
-### macOS signing note
+Date ranges are inclusive and are based on the start date of each logged session.
 
-The CI build is ad-hoc signed by PyInstaller so that the Apple Silicon bundle is internally valid, but it is not Developer ID signed or notarized. macOS may therefore show a Gatekeeper warning for a downloaded release. A fully notarized public distribution can be added later by storing an Apple Developer signing certificate/notarization credentials as GitHub Actions secrets.
+### 5. Manage activity names
 
-The Windows executable is likewise not Authenticode-signed, so Windows SmartScreen may warn on a newly downloaded build.
+Click **Manage Activities** to maintain the activity list.
 
-## Runtime versions
+![Manage Activities dialog](docs/screenshots/manage-activities.png)
 
-The reproducible build currently pins:
+From here you can:
 
-- Python 3.14.7
-- pandas 3.0.5
-- PyQt5 5.15.11
-- Qt 5.15.19
-- PyInstaller 6.22.2
+- **Add to dropdown** — create a new activity.
+- **Rename everywhere** — rename an activity in both the dropdown and all matching historical log entries.
+- **Merge activities** — rename one activity to an existing activity name; their historical totals will then be combined.
+- **Remove from dropdown** — stop showing an activity in the dropdown without deleting its historical records.
 
-The macOS workflow runs on a GitHub-hosted Apple Silicon runner and verifies that both Python and the generated application are `arm64`.
+Retrospective renaming creates timestamped backups before modifying your CSV files.
 
-## Data files
+### 6. Open the underlying data
 
-The packaged application stores writable data separately from the application bundle:
+Click **Open Data Folder** to open the application's data directory in Finder or Explorer.
+
+The data remain ordinary CSV files and can be inspected, backed up, analysed or edited independently of the application.
+
+---
+
+## Download
+
+Download the latest packaged version from the repository's **Releases** page.
+
+Release builds are produced automatically for:
+
+- **macOS Apple Silicon (arm64)** — `OpenTimeTracker-macOS-arm64.zip`
+- **Windows x64** — `OpenTimeTracker.exe`
+
+Python is bundled into both builds, so users do **not** need to install Python separately.
+
+### macOS security note
+
+The current macOS build is ad-hoc signed but is not yet Apple Developer ID notarised. macOS may therefore display a Gatekeeper warning when opening a downloaded release for the first time.
+
+### Windows security note
+
+The Windows executable is not currently Authenticode signed, so Windows SmartScreen may warn about a newly downloaded build.
+
+---
+
+## Data storage
+
+Open Time Tracker is deliberately **local-first**. There is no cloud account, remote database, sync service or subscription.
 
 ### macOS
 
@@ -111,28 +118,113 @@ The packaged application stores writable data separately from the application bu
 └── backups\
 ```
 
-On first run, the application attempts to migrate `activities.csv` and `time_log.csv` from locations used by older source/AppleScript launches. If no activities file exists, the bundled `activities.csv` is copied into the user data directory as a starting list.
+On first run, packaged versions attempt to migrate `activities.csv` and `time_log.csv` from locations used by older versions of the app.
 
-`time_log.csv` has the following structure:
+The **Open Data Folder** button takes you directly to the appropriate directory.
+
+### `time_log.csv`
+
+Each completed session is stored as one row:
 
 | StartTime | EndTime | Duration | Task |
 |---|---|---|---|
-| 2025-03-27 14:47:40 | 2025-03-27 14:47:45 | 00:00:04 | Exam Board |
-| 2025-03-27 14:47:48 | 2025-03-27 14:47:53 | 00:00:04 | Research |
+| 2026-01-12 09:00:00 | 2026-01-12 10:15:00 | 01:15:00 | Research |
+| 2026-01-12 10:30:00 | 2026-01-12 11:00:00 | 00:30:00 | Teaching |
 
-Use **Open Data Folder** in the application to open this directory directly. The **Manage Activities** dialog can rename an activity retrospectively; exact matches in the `Task` column are changed and existing categories can be merged. Before a retrospective rename, the affected CSV files are copied into the `backups` directory.
+### `activities.csv`
+
+This contains the activity names shown in the dropdown. Historical task names can exist in `time_log.csv` even if they have been removed from the dropdown.
+
+### Backups
+
+Before a retrospective rename modifies persistent data, timestamped copies are written to:
+
+```text
+OpenTimeTracker/backups/
+```
+
+Removing an activity from the dropdown does **not** alter historical records.
+
+---
+
+## Features
+
+- Start/stop task timing
+- Real-time elapsed time display
+- Editable activity dropdown
+- Automatic addition of newly typed activities
+- Backdated log entries
+- Manual start-time adjustment
+- Today's recent log display
+- All-time task summaries
+- Optional summary start and/or end dates
+- Total hours and percentage-of-time summaries
+- Activity management interface
+- Retrospective activity renaming
+- Activity merging
+- Automatic backups before historical renames
+- Direct access to the data folder
+- Local CSV storage
+- Native Apple Silicon macOS packaging
+- Standalone Windows x64 packaging
+- Automatic cross-platform builds with GitHub Actions
+
+---
+
+## Version history
+
+### v1.3.1
+
+- Fixed a crash in the **Manage Activities** interface under the newer PyQt/Python build.
+- Activity-management errors are now contained and shown as dialogs instead of terminating the application.
+
+### v1.3.0
+
+Major data-management and packaging update:
+
+- Added **Open Data Folder**.
+- Added **Manage Activities**.
+- Added retrospective renaming and merging of historical activity names.
+- Added automatic backups before historical edits.
+- Added optional start/end date filters for summaries.
+- Added total logged hours to summaries.
+- Moved packaged application data into the normal per-user application-data directory.
+- Added native Apple Silicon and Windows x64 release builds.
+- Added automatic GitHub Actions builds and tagged releases.
+
+### v1.1.x
+
+- Added backdated entries.
+- Added real-time elapsed time.
+- Added editable start times.
+- Added auto-updating Stop Time with manual override.
+- Improved daily-log and summary displays.
+
+### v1.0.0
+
+- Initial start/stop time tracker.
+- CSV logging.
+- Daily logs and summary statistics.
+- Editable task list.
+
+---
 
 ## Running from source
 
-Python 3.14.7 is the pinned development/runtime version.
+The packaged releases are the easiest way to use the application. For development, clone the repository and install the Python dependencies.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate       # macOS/Linux
 # .venv\Scripts\activate        # Windows
+
 python -m pip install -r requirements.txt
 python time_tracker.py
 ```
+
+The current reproducible build targets Python 3.14.7.
+
+---
 
 ## Building locally
 
@@ -144,7 +236,7 @@ python -m pip install -r requirements-build.txt
 
 ### Apple Silicon macOS
 
-Run this from an arm64 Python environment:
+Run from an arm64 Python environment:
 
 ```bash
 python -m PyInstaller \
@@ -156,7 +248,11 @@ python -m PyInstaller \
   time_tracker.py
 ```
 
-The application will be written to `dist/OpenTimeTracker.app`.
+The result is:
+
+```text
+dist/OpenTimeTracker.app
+```
 
 ### Windows x64
 
@@ -171,7 +267,35 @@ python -m PyInstaller `
   time_tracker.py
 ```
 
-The executable will be written to `dist/OpenTimeTracker.exe`.
+The result is:
+
+```text
+dist/OpenTimeTracker.exe
+```
+
+---
+
+## Automated builds and releases
+
+The GitHub Actions workflow builds both supported platforms whenever changes are pushed to `main`.
+
+Normal `main` builds are available as workflow artifacts.
+
+Pushing a version tag creates a GitHub Release and attaches both packaged applications automatically:
+
+```bash
+git tag v1.3.1
+git push origin v1.3.1
+```
+
+The workflow produces:
+
+```text
+OpenTimeTracker-macOS-arm64.zip
+OpenTimeTracker.exe
+```
+
+---
 
 ## Repository structure
 
@@ -180,13 +304,31 @@ The executable will be written to `dist/OpenTimeTracker.exe`.
 ├── .github/
 │   └── workflows/
 │       └── build.yml
-├── .python-version
+├── docs/
+│   └── screenshots/
+│       ├── main-window.png
+│       └── manage-activities.png
 ├── activities.csv
 ├── requirements.txt
 ├── requirements-build.txt
 ├── time_tracker.py
 └── README.md
 ```
+
+---
+
+## Technology
+
+Current packaged builds use:
+
+- Python 3.14.7
+- pandas
+- PyQt5
+- PyInstaller
+
+The macOS workflow verifies that the generated application is native `arm64`.
+
+---
 
 ## License
 
