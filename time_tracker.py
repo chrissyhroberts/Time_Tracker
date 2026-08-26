@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-from PyQt5.QtCore import QDate, QTimer, QUrl
+from PyQt5.QtCore import QDate, QTimer, QUrl, Qt
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (
     QApplication,
@@ -364,7 +364,7 @@ class ActivityManagerDialog(QDialog):
         names = all_activity_names()
         self.activity_list.addItems(names)
         if select_name in names:
-            items = self.activity_list.findItems(select_name, 0)
+            items = self.activity_list.findItems(select_name, Qt.MatchExactly)
             if items:
                 self.activity_list.setCurrentItem(items[0])
 
@@ -373,71 +373,92 @@ class ActivityManagerDialog(QDialog):
             self.name_edit.setText(name)
 
     def add_selected_name(self):
-        name = self.name_edit.text().strip()
-        if not name:
-            QMessageBox.warning(self, "Missing Activity", "Enter an activity name first.")
-            return
-        added = add_activity(name)
-        self.tracker.activity_data_changed()
-        self.refresh_list(select_name=name)
-        if not added:
-            QMessageBox.information(self, "Already Present", f"'{name}' is already in the dropdown list.")
+        try:
+            name = self.name_edit.text().strip()
+            if not name:
+                QMessageBox.warning(self, "Missing Activity", "Enter an activity name first.")
+                return
+            added = add_activity(name)
+            self.tracker.activity_data_changed()
+            self.refresh_list(select_name=name)
+            if not added:
+                QMessageBox.information(self, "Already Present", f"'{name}' is already in the dropdown list.")
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Activity Error",
+                f"Could not add the activity:\n\n{exc}",
+            )
 
     def rename_selected_activity(self):
-        selected = self.activity_list.currentItem()
-        if not selected:
-            QMessageBox.warning(self, "No Selection", "Select the activity you want to rename.")
-            return
-
-        old_name = selected.text().strip()
-        new_name = self.name_edit.text().strip()
-        if not new_name:
-            QMessageBox.warning(self, "Missing Name", "Enter the new activity name.")
-            return
-        if old_name == new_name:
-            return
-
-        if new_name in all_activity_names():
-            answer = QMessageBox.question(
-                self,
-                "Merge Activities?",
-                f"'{new_name}' already exists. Rename '{old_name}' to '{new_name}' and merge their historical totals?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if answer != QMessageBox.Yes:
+        try:
+            selected = self.activity_list.currentItem()
+            if not selected:
+                QMessageBox.warning(self, "No Selection", "Select the activity you want to rename.")
                 return
 
-        changed_rows = rename_activity_everywhere(old_name, new_name)
-        self.tracker.activity_data_changed(old_name=old_name, new_name=new_name)
-        self.refresh_list(select_name=new_name)
-        QMessageBox.information(
-            self,
-            "Activity Renamed",
-            f"Renamed '{old_name}' to '{new_name}'.\nHistorical rows updated: {changed_rows}\nBackups are stored in the data folder's backups directory.",
-        )
+            old_name = selected.text().strip()
+            new_name = self.name_edit.text().strip()
+            if not new_name:
+                QMessageBox.warning(self, "Missing Name", "Enter the new activity name.")
+                return
+            if old_name == new_name:
+                return
+
+            if new_name in all_activity_names():
+                answer = QMessageBox.question(
+                    self,
+                    "Merge Activities?",
+                    f"'{new_name}' already exists. Rename '{old_name}' to '{new_name}' and merge their historical totals?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if answer != QMessageBox.Yes:
+                    return
+
+            changed_rows = rename_activity_everywhere(old_name, new_name)
+            self.tracker.activity_data_changed(old_name=old_name, new_name=new_name)
+            self.refresh_list(select_name=new_name)
+            QMessageBox.information(
+                self,
+                "Activity Renamed",
+                f"Renamed '{old_name}' to '{new_name}'.\nHistorical rows updated: {changed_rows}\nBackups are stored in the data folder's backups directory.",
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Activity Error",
+                f"Could not rename the activity:\n\n{exc}",
+            )
 
     def remove_selected_activity(self):
-        selected = self.activity_list.currentItem()
-        if not selected:
-            QMessageBox.warning(self, "No Selection", "Select an activity first.")
-            return
+        try:
+            selected = self.activity_list.currentItem()
+            if not selected:
+                QMessageBox.warning(self, "No Selection", "Select an activity first.")
+                return
 
-        name = selected.text().strip()
-        removed = remove_activity_from_list(name)
-        self.tracker.activity_data_changed()
-        self.refresh_list(select_name=name)
-        if removed:
-            QMessageBox.information(
+            name = selected.text().strip()
+            removed = remove_activity_from_list(name)
+            self.tracker.activity_data_changed()
+            self.refresh_list(select_name=name)
+            if removed:
+                QMessageBox.information(
+                    self,
+                    "Removed from Dropdown",
+                    f"'{name}' was removed from the dropdown. Historical log entries were not changed.",
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Historical Activity",
+                    f"'{name}' is not currently in the dropdown list; its historical log entries remain available for summaries and renaming.",
+                )
+        except Exception as exc:
+            QMessageBox.critical(
                 self,
-                "Removed from Dropdown",
-                f"'{name}' was removed from the dropdown. Historical log entries were not changed.",
-            )
-        else:
-            QMessageBox.information(
-                self,
-                "Historical Activity",
-                f"'{name}' is not currently in the dropdown list; its historical log entries remain available for summaries and renaming.",
+                "Activity Error",
+                f"Could not remove the activity:\n\n{exc}",
             )
 
 
