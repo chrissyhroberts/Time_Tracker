@@ -367,7 +367,9 @@ class CalendarEntryDialog(QDialog):
         self.setWindowTitle("Edit Calendar Entry")
         start = pd.to_datetime(row["StartTime"]).to_pydatetime()
         end = pd.to_datetime(row["EndTime"]).to_pydatetime()
-        self.task_edit = QLineEdit(str(row.get("Task", "")))
+        self.task_edit = QComboBox()
+        self.task_edit.addItems(all_activity_names())
+        self.task_edit.setCurrentText(str(row.get("Task", "")))
         self.start_date = QDateEdit(QDate(start.year, start.month, start.day))
         self.end_date = QDateEdit(QDate(end.year, end.month, end.day))
         self.start_time = QTimeEdit(QTime(start.hour, start.minute, start.second))
@@ -396,7 +398,7 @@ class CalendarEntryDialog(QDialog):
         st, et = self.start_time.time(), self.end_time.time()
         start = datetime.datetime(sd.year(), sd.month(), sd.day(), st.hour(), st.minute(), st.second())
         end = datetime.datetime(ed.year(), ed.month(), ed.day(), et.hour(), et.minute(), et.second())
-        return self.task_edit.text().strip(), start, end
+        return self.task_edit.currentText().strip(), start, end
 
     def validate_and_accept(self):
         task, start, end = self.values()
