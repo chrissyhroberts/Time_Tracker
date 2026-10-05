@@ -4,10 +4,11 @@ import datetime
 import os
 import shutil
 import sys
+import uuid
 from pathlib import Path
 
 import pandas as pd
-from PyQt5.QtCore import QDate, QTimer, QUrl, Qt
+from PyQt5.QtCore import QDate, QTime, QTimer, QUrl, Qt
 from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QPainter, QPen
 from PyQt5.QtWidgets import (
     QApplication,
@@ -15,7 +16,9 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDialog,
+    QDialogButtonBox,
     QFrame,
+    QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -26,6 +29,7 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QTextEdit,
+    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -143,11 +147,20 @@ def save_activities(activities):
 
 def load_log():
     """Load the time log, returning an empty log with the expected schema if absent."""
-    columns = ["StartTime", "EndTime", "Duration", "Task"]
+    columns = ["EntryID", "StartTime", "EndTime", "Duration", "Task"]
     if not LOG_FILE.exists() or LOG_FILE.stat().st_size == 0:
         return pd.DataFrame(columns=columns)
 
     df = pd.read_csv(LOG_FILE)
+    needs_migration = "EntryID" not in df.columns
+    if "EntryID" not in df.columns:
+        df.insert(0, "EntryID", "")
+    missing_ids = df["EntryID"].isna() | (df["EntryID"].astype(str).str.strip() == "")
+    needs_migration = needs_migration or bool(missing_ids.any())
+    if needs_migration:
+        backup_data_file(LOG_FILE)
+        df.loc[missing_ids, "EntryID"] = [str(uuid.uuid4()) for _ in range(int(missing_ids.sum()))]
+        df.to_csv(LOG_FILE, index=False)
     for column in columns:
         if column not in df.columns:
             df[column] = pd.NA
@@ -231,12 +244,21 @@ def save_log(task, start, end):
         f"{duration_seconds % 60:02}"
     )
     new_entry = pd.DataFrame(
-        [[start.strftime("%Y-%m-%d %H:%M:%S"), end.strftime("%Y-%m-%d %H:%M:%S"), duration, task]],
-        columns=["StartTime", "EndTime", "Duration", "Task"],
+        [[str(uuid.uuid4()), start.strftime("%Y-%m-%d %H:%M:%S"), end.strftime("%Y-%m-%d %H:%M:%S"), duration, task]],
+        columns=["EntryID", "StartTime", "EndTime", "Duration", "Task"],
     )
     df = load_log()
     df = pd.concat([df, new_entry], ignore_index=True)
     df.to_csv(LOG_FILE, index=False)
+
+
+def duration_to_hms(seconds):
+    seconds = max(0, int(seconds))
+    return (
+        f"{seconds // 3600:02}:"
+        f"{(seconds % 3600) // 60:02}:"
+        f"{seconds % 60:02}"
+    )
 
 
 def duration_to_seconds(value):
@@ -337,6 +359,55 @@ def logs_overlapping_range(start_dt, end_dt):
     return out
 
 
+class CalendarEntryDialog(QDialog):
+    """Edit one exact log row, identified by its stable EntryID."""
+
+    def __init__(self, row, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Edit Calendar Entry")
+        start = pd.to_datetime(row["StartTime"]).to_pydatetime()
+        end = pd.to_datetime(row["EndTime"]).to_pydatetime()
+        self.task_edit = QLineEdit(str(row.get("Task", "")))
+        self.start_date = QDateEdit(QDate(start.year, start.month, start.day))
+        self.end_date = QDateEdit(QDate(end.year, end.month, end.day))
+        self.start_time = QTimeEdit(QTime(start.hour, start.minute, start.second))
+        self.end_time = QTimeEdit(QTime(end.hour, end.minute, end.second))
+        for control in (self.start_date, self.end_date):
+            control.setCalendarPopup(True)
+            control.setDisplayFormat("yyyy-MM-dd")
+        for control in (self.start_time, self.end_time):
+            control.setDisplayFormat("HH:mm:ss")
+
+        form = QFormLayout()
+        form.addRow("Task", self.task_edit)
+        form.addRow("Start date", self.start_date)
+        form.addRow("Start time", self.start_time)
+        form.addRow("End date", self.end_date)
+        form.addRow("End time", self.end_time)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.validate_and_accept)
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def values(self):
+        sd, ed = self.start_date.date(), self.end_date.date()
+        st, et = self.start_time.time(), self.end_time.time()
+        start = datetime.datetime(sd.year(), sd.month(), sd.day(), st.hour(), st.minute(), st.second())
+        end = datetime.datetime(ed.year(), ed.month(), ed.day(), et.hour(), et.minute(), et.second())
+        return self.task_edit.text().strip(), start, end
+
+    def validate_and_accept(self):
+        task, start, end = self.values()
+        if not task:
+            QMessageBox.warning(self, "Invalid Entry", "Task cannot be empty.")
+        elif end <= start:
+            QMessageBox.warning(self, "Invalid Times", "End time must be after start time.")
+        else:
+            self.accept()
+
+
 class WeekDayCanvas(QWidget):
     """One 24-hour day column used by the retrospective week calendar."""
 
@@ -350,7 +421,8 @@ class WeekDayCanvas(QWidget):
         self.date_value = date_value
         self.drag_start_minute = None
         self.drag_current_minute = None
-        self.setMinimumWidth(118)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setFixedHeight(self.PIXELS_PER_HOUR * 24)
         self.setMouseTracking(True)
 
@@ -403,7 +475,8 @@ class WeekDayCanvas(QWidget):
                 x = 3
                 w = max(10, self.width() - 6)
                 painter.fillRect(int(x), int(top), int(w), int(height), QBrush(colour))
-                painter.setPen(QPen(QColor(95, 95, 95)))
+                selected = str(row.get("EntryID", "")) == str(self.owner.selected_entry_id or "")
+                painter.setPen(QPen(QColor(220, 95, 25) if selected else QColor(95, 95, 95), 3 if selected else 1))
                 painter.drawRect(int(x), int(top), int(w), int(height))
 
                 if height >= 18:
@@ -429,6 +502,11 @@ class WeekDayCanvas(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            row = self.entry_at(event.y())
+            if row is not None:
+                self.owner.select_entry(row)
+                self.update()
+                return
             minute = self.minute_from_y(event.y())
             self.drag_start_minute = minute
             self.drag_current_minute = minute
@@ -458,6 +536,26 @@ class WeekDayCanvas(QWidget):
         end_dt = day_start + datetime.timedelta(minutes=end_minute)
         self.owner.create_calendar_entry(start_dt, end_dt)
 
+    def entry_at(self, y):
+        day_start = datetime.datetime.combine(self.date_value, datetime.time.min)
+        day_end = day_start + datetime.timedelta(days=1)
+        df = logs_overlapping_range(day_start, day_end)
+        for _, row in df.iterrows():
+            start = max(row["_start"].to_pydatetime(), day_start)
+            end = min(row["_end"].to_pydatetime(), day_end)
+            top = self.y_from_minute((start - day_start).total_seconds() / 60)
+            bottom = self.y_from_minute((end - day_start).total_seconds() / 60)
+            if top <= y <= max(top + 4, bottom):
+                return row.to_dict()
+        return None
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            row = self.entry_at(event.y())
+            if row is not None:
+                self.owner.select_entry(row)
+                self.owner.edit_selected_entry()
+
 
 class WeekCalendarPanel(QFrame):
     """Monday-Sunday 24-hour visual calendar with drag-to-create entry."""
@@ -466,6 +564,8 @@ class WeekCalendarPanel(QFrame):
         super().__init__(tracker)
         self.tracker = tracker
         self.current_week_start = week_start_for(datetime.date.today())
+        self.selected_entry = None
+        self.selected_entry_id = None
         self.setFrameShape(QFrame.StyledPanel)
         self.setMinimumWidth(820)
 
@@ -490,6 +590,14 @@ class WeekCalendarPanel(QFrame):
         self.next_button.setToolTip("Next week")
         self.next_button.clicked.connect(lambda: self.shift_week(7))
         nav.addWidget(self.next_button)
+        self.edit_button = QPushButton("Edit")
+        self.edit_button.setEnabled(False)
+        self.edit_button.clicked.connect(self.edit_selected_entry)
+        nav.addWidget(self.edit_button)
+        self.delete_button = QPushButton("Delete")
+        self.delete_button.setEnabled(False)
+        self.delete_button.clicked.connect(self.delete_selected_entry)
+        nav.addWidget(self.delete_button)
         outer.addLayout(nav)
 
         hint = QLabel("Drag over any blank time to add a retrospective entry. Times snap to 15 minutes.")
@@ -497,9 +605,16 @@ class WeekCalendarPanel(QFrame):
         hint.setStyleSheet("color: #666;")
         outer.addWidget(hint)
 
+        self.header_widget = QWidget()
+        self.header_grid = QGridLayout(self.header_widget)
+        self.header_grid.setContentsMargins(4, 4, 4, 0)
+        self.header_grid.setHorizontalSpacing(2)
+        self.header_grid.setVerticalSpacing(0)
+        outer.addWidget(self.header_widget)
+
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         self.calendar_widget = QWidget()
@@ -507,6 +622,9 @@ class WeekCalendarPanel(QFrame):
         self.grid.setContentsMargins(4, 4, 4, 4)
         self.grid.setHorizontalSpacing(2)
         self.grid.setVerticalSpacing(0)
+        self.grid.setColumnStretch(0, 0)
+        for column in range(1, 8):
+            self.grid.setColumnStretch(column, 1)
         self.scroll.setWidget(self.calendar_widget)
         outer.addWidget(self.scroll, 1)
 
@@ -529,15 +647,19 @@ class WeekCalendarPanel(QFrame):
             widget = item.widget()
             if widget:
                 widget.deleteLater()
+        while self.header_grid.count():
+            item = self.header_grid.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
 
         end = self.current_week_start + datetime.timedelta(days=6)
         self.week_label.setText(
             f"{self.current_week_start.strftime('%d %b %Y')} – {end.strftime('%d %b %Y')}"
         )
 
-        corner = QLabel("Time")
-        corner.setAlignment(Qt.AlignCenter)
-        self.grid.addWidget(corner, 0, 0)
+        self.header_grid.addWidget(QLabel("Time"), 0, 0)
+        self.header_grid.setColumnMinimumWidth(0, 52)
 
         self.day_canvases = []
         for day_index in range(7):
@@ -546,11 +668,12 @@ class WeekCalendarPanel(QFrame):
             header.setAlignment(Qt.AlignCenter)
             if date_value == datetime.date.today():
                 header.setStyleSheet("font-weight: 700;")
-            self.grid.addWidget(header, 0, day_index + 1)
+            self.header_grid.addWidget(header, 0, day_index + 1)
+            self.header_grid.setColumnStretch(day_index + 1, 1)
 
             canvas = WeekDayCanvas(self, date_value)
             self.day_canvases.append(canvas)
-            self.grid.addWidget(canvas, 1, day_index + 1)
+            self.grid.addWidget(canvas, 0, day_index + 1)
 
         # Time labels in a matching 24-hour column.
         time_column = QWidget()
@@ -565,7 +688,64 @@ class WeekCalendarPanel(QFrame):
             label.setFixedHeight(WeekDayCanvas.PIXELS_PER_HOUR)
             label.setStyleSheet("font-size: 10px; color: #666; padding-right: 4px;")
             time_layout.addWidget(label)
-        self.grid.addWidget(time_column, 1, 0)
+        self.grid.addWidget(time_column, 0, 0)
+        self.header_widget.setMinimumHeight(42)
+        self.header_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.calendar_widget.setMinimumWidth(0)
+
+    def select_entry(self, row):
+        self.selected_entry = row
+        self.selected_entry_id = str(row.get("EntryID", ""))
+        self.edit_button.setEnabled(True)
+        self.delete_button.setEnabled(True)
+        self.refresh()
+
+    def edit_selected_entry(self):
+        row = self.selected_entry
+        if not row:
+            return
+        try:
+            dialog = CalendarEntryDialog(row, self)
+            if dialog.exec_() != QDialog.Accepted:
+                return
+            task, start, end = dialog.values()
+            df = load_log()
+            matches = df["EntryID"].astype(str) == str(row.get("EntryID", ""))
+            if not matches.any():
+                raise ValueError("The selected entry no longer exists.")
+            backup_data_file(LOG_FILE)
+            df.loc[matches, "Task"] = task
+            df.loc[matches, "StartTime"] = start.strftime("%Y-%m-%d %H:%M:%S")
+            df.loc[matches, "EndTime"] = end.strftime("%Y-%m-%d %H:%M:%S")
+            df.loc[matches, "Duration"] = duration_to_hms(int((end - start).total_seconds()))
+            df.to_csv(LOG_FILE, index=False)
+            add_activity(task)
+            self.tracker.refresh_task_dropdown()
+            self.tracker.update_log_display()
+        except Exception as exc:
+            QMessageBox.critical(self, "Calendar Error", f"Could not edit the entry:\n\n{exc}")
+
+    def delete_selected_entry(self):
+        row = self.selected_entry
+        if not row:
+            return
+        if QMessageBox.question(self, "Delete Calendar Entry", f"Delete '{row.get('Task', '')}'?", QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+            return
+        try:
+            df = load_log()
+            matches = df["EntryID"].astype(str) == str(row.get("EntryID", ""))
+            if not matches.any():
+                raise ValueError("The selected entry no longer exists.")
+            backup_data_file(LOG_FILE)
+            df = df.loc[~matches].copy()
+            df.to_csv(LOG_FILE, index=False)
+            self.selected_entry = None
+            self.selected_entry_id = None
+            self.edit_button.setEnabled(False)
+            self.delete_button.setEnabled(False)
+            self.tracker.update_log_display()
+        except Exception as exc:
+            QMessageBox.critical(self, "Calendar Error", f"Could not delete the entry:\n\n{exc}")
 
     def refresh(self):
         for canvas in self.day_canvases:

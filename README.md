@@ -207,6 +207,17 @@ Removing an activity from the dropdown does **not** alter historical records.
 - New calendar entries use the existing activity list and write to the same `time_log.csv`.
 - Calendar and summary views refresh automatically after saving.
 
+### v1.5.0
+
+- Added a stable UUID **EntryID** to every time-log row.
+- Existing logs are migrated automatically, with a backup created before migration.
+- Calendar weekday/date headers remain visible while the 24-hour body scrolls.
+- Seven day columns expand to fit the calendar panel without normal horizontal scrolling.
+- Calendar entries can be selected, edited, or deleted by their exact EntryID.
+- Edit dialogs support task, start date/time, and end date/time with end-after-start validation.
+- Double-clicking a calendar entry opens its editor.
+- Edits and deletions create timestamped backups before changing the log.
+
 ### v1.3.1
 
 - Fixed a crash in the **Manage Activities** interface under the newer PyQt/Python build.
